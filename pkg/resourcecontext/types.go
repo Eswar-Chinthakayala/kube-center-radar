@@ -390,8 +390,9 @@ type IssueSummary struct {
 	BySource        map[string]int `json:"bySource,omitempty"`
 }
 
-// AuditSummary is a rollup of audit-engine findings scoped to the
-// subject resource.
+// AuditSummary is a rollup of static posture findings scoped to the subject
+// resource. HighestSeverity uses the canonical Checks severity ladder; it is
+// remediation priority, not proof of an active outage.
 type AuditSummary struct {
 	Count           int    `json:"count"`
 	HighestSeverity string `json:"highestSeverity,omitempty"`
