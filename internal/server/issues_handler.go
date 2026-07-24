@@ -109,16 +109,24 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	})
 	if len(namespaces) == 1 && stats.TotalMatched == len(out) && meaningfulchanges.IssueChangesQueryEligible(q.Get("kind"), q.Get("filter"), q.Get("severity")) {
 		if recentChangesReason := meaningfulchanges.IssueChangesReason(out); recentChangesReason != "" {
-			if changes, truncated, err := meaningfulchanges.Recent(r.Context(), meaningfulchanges.Query{
+			if recentResult, err := meaningfulchanges.Recent(r.Context(), meaningfulchanges.Query{
 				Namespaces: []string{namespaces[0]},
 				Since:      meaningfulchanges.DefaultSince,
-				Limit:      meaningfulchanges.IssueChangesLimit,
+				Limit:      meaningfulchanges.IssueChangesFetchLimit(recentChangesReason),
 				FieldLimit: meaningfulchanges.DefaultFieldLimit,
-			}); err == nil && len(changes) > 0 {
+			}); err == nil && len(recentResult.Changes) > 0 {
+				changes, guidance, recapped := meaningfulchanges.PrioritizeIssueChanges(
+					recentResult.Changes, out, meaningfulchanges.IssueChangePriorityOptions{
+						Reason:             recentChangesReason,
+						Limit:              meaningfulchanges.IssueChangesLimit,
+						UnfilteredIssueSet: meaningfulchanges.IssueSeveritySetComplete(severities),
+						FetchSaturated:     recentResult.FetchSaturated,
+					},
+				)
 				resp.RecentChanges = changes
 				resp.RecentChangesReason = recentChangesReason
-				resp.RecentChangesGuidance = meaningfulchanges.IssueChangesGuidance(recentChangesReason)
-				resp.RecentChangesTruncated = truncated
+				resp.RecentChangesGuidance = guidance
+				resp.RecentChangesTruncated = recentResult.OutputCapped || recentResult.FetchSaturated || recapped
 			}
 		}
 	}
