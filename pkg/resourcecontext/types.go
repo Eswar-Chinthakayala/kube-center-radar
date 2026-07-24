@@ -16,6 +16,8 @@
 // and for stable, machine-friendly JSON output.
 package resourcecontext
 
+import "time"
+
 // ResourceContext is the top-level enrichment block attached to a resource
 // response. Every field is optional; the zero value is a valid (empty)
 // "basic"-tier context.
@@ -109,8 +111,11 @@ type UsesBlock struct {
 }
 
 type AppReferences struct {
-	ServiceEnv   []ServiceEnvReference      `json:"serviceEnv,omitempty"`
-	DuplicateEnv []DuplicateEnvVarReference `json:"duplicateEnv,omitempty"`
+	ServiceEnv              []ServiceEnvReference        `json:"serviceEnv,omitempty"`
+	DuplicateEnv            []DuplicateEnvVarReference   `json:"duplicateEnv,omitempty"`
+	RemovedServiceEnv       []RemovedServiceEnvReference `json:"removedServiceEnv,omitempty"`
+	StaleSecretEnv          []StaleSecretEnvReference    `json:"staleSecretEnv,omitempty"`
+	StaleSecretEnvTruncated bool                         `json:"staleSecretEnvTruncated,omitempty"`
 }
 
 type ServiceEnvReference struct {
@@ -136,6 +141,31 @@ type DuplicateEnvVarReference struct {
 type DuplicateEnvVarOccurrence struct {
 	Position int    `json:"position"`
 	Value    string `json:"value"`
+}
+
+type RemovedServiceEnvReference struct {
+	Container      string     `json:"container"`
+	Env            string     `json:"env"`
+	OldValue       string     `json:"oldValue"`
+	Service        ContextRef `json:"service"`
+	ReferencedPort int32      `json:"referencedPort,omitempty"`
+	RemovedAt      time.Time  `json:"removedAt"`
+	Message        string     `json:"message,omitempty"`
+}
+
+type StaleSecretEnvReference struct {
+	Pod                string     `json:"pod,omitempty"`
+	AffectedPods       int        `json:"affectedPods,omitempty"`
+	Container          string     `json:"container"`
+	Env                string     `json:"env,omitempty"`
+	ReferenceKind      string     `json:"referenceKind"`
+	EvidenceSource     string     `json:"evidenceSource"`
+	Prefix             string     `json:"prefix,omitempty"`
+	Secret             ContextRef `json:"secret"`
+	Key                string     `json:"key,omitempty"`
+	ContainerStartedAt time.Time  `json:"containerStartedAt"`
+	SecretChangedAt    time.Time  `json:"secretChangedAt"`
+	Message            string     `json:"message,omitempty"`
 }
 
 // ReferencedBy lists workload specs that directly reference the subject

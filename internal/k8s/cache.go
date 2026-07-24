@@ -1,7 +1,9 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -117,6 +119,185 @@ type ResourceCache struct {
 	// continuously OutOfSync. Lives here so its lifecycle is the cache's:
 	// recreated per cluster, dropped on a kubeconfig context switch.
 	argoDrift *argoDriftTracker
+	// secretWriteTimes preserves verified Secret data-owner write times that
+	// the shared informer transform intentionally strips before caching.
+	secretWriteTimes *secretDataManagerWriteIndex
+}
+
+type secretDataManagerWrite struct {
+	uid string
+	at  time.Time
+}
+
+type secretDataManagerWriteVersion struct {
+	namespace       string
+	name            string
+	uid             string
+	resourceVersion string
+}
+
+type pendingSecretDataManagerWrite struct {
+	write *secretDataManagerWrite
+	helm  bool
+}
+
+type secretDataManagerWriteIndex struct {
+	mu           sync.Mutex
+	committed    map[string]secretDataManagerWrite
+	pending      map[secretDataManagerWriteVersion]pendingSecretDataManagerWrite
+	pendingLimit int
+}
+
+const maxPendingSecretDataManagerWrites = 10_000
+
+func newSecretDataManagerWriteIndex() *secretDataManagerWriteIndex {
+	return &secretDataManagerWriteIndex{
+		committed:    make(map[string]secretDataManagerWrite),
+		pending:      make(map[secretDataManagerWriteVersion]pendingSecretDataManagerWrite),
+		pendingLimit: maxPendingSecretDataManagerWrites,
+	}
+}
+
+func secretWriteKey(namespace, name string) string {
+	return namespace + "\x00" + name
+}
+
+func secretChangeWritesData(change k8score.ResourceChange) bool {
+	if change.Diff == nil {
+		return false
+	}
+	for _, field := range change.Diff.Fields {
+		if isSecretDataWritePath(field.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSecretDataWritePath(path string) bool {
+	switch path {
+	case "data (added keys)", "data (removed keys)", "data (modified keys)",
+		"stringData (added keys)", "stringData (removed keys)", "stringData (modified keys)":
+		return true
+	default:
+		return false
+	}
+}
+
+func (index *secretDataManagerWriteIndex) capture(obj any) {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok || secret == nil || index == nil {
+		return
+	}
+	var latest time.Time
+	for _, entry := range secret.ManagedFields {
+		if entry.Time == nil || entry.FieldsV1 == nil ||
+			(entry.Operation != metav1.ManagedFieldsOperationApply && entry.Operation != metav1.ManagedFieldsOperationUpdate) {
+			continue
+		}
+		raw := entry.FieldsV1.Raw
+		if !bytes.Contains(raw, []byte(`"f:data"`)) && !bytes.Contains(raw, []byte(`"f:stringData"`)) {
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			continue
+		}
+		if _, ownsData := fields["f:data"]; !ownsData {
+			if _, ownsStringData := fields["f:stringData"]; !ownsStringData {
+				continue
+			}
+		}
+		if entry.Time.Time.After(latest) {
+			latest = entry.Time.Time
+		}
+	}
+	version := secretDataManagerWriteVersion{
+		namespace:       secret.Namespace,
+		name:            secret.Name,
+		uid:             string(secret.UID),
+		resourceVersion: secret.ResourceVersion,
+	}
+	pending := pendingSecretDataManagerWrite{
+		helm: secret.Type == corev1.SecretType("helm.sh/release.v1"),
+	}
+	if !latest.IsZero() {
+		pending.write = &secretDataManagerWrite{uid: string(secret.UID), at: latest}
+	}
+	index.mu.Lock()
+	if _, exists := index.pending[version]; !exists && len(index.pending) >= index.pendingLimit {
+		// Transform observations are advisory. Under callback starvation,
+		// discard unmatched candidates rather than grow without bound; a
+		// missing fallback fails closed and a later object version can restage.
+		clear(index.pending)
+	}
+	index.pending[version] = pending
+	index.mu.Unlock()
+}
+
+func (index *secretDataManagerWriteIndex) reconcile(change k8score.ResourceChange, obj any) {
+	if index == nil || change.Kind != "Secret" {
+		return
+	}
+	key := secretWriteKey(change.Namespace, change.Name)
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	if change.Operation == k8score.OpDelete {
+		if write, ok := index.committed[key]; ok && write.uid == change.UID {
+			delete(index.committed, key)
+		}
+		for version := range index.pending {
+			if version.namespace == change.Namespace && version.name == change.Name && version.uid == change.UID {
+				delete(index.pending, version)
+			}
+		}
+		return
+	}
+
+	meta, ok := obj.(metav1.Object)
+	if !ok || meta == nil {
+		return
+	}
+	version := secretDataManagerWriteVersion{
+		namespace:       change.Namespace,
+		name:            change.Name,
+		uid:             change.UID,
+		resourceVersion: meta.GetResourceVersion(),
+	}
+	pending, ok := index.pending[version]
+	if !ok {
+		return
+	}
+	delete(index.pending, version)
+
+	if pending.helm {
+		if write, ok := index.committed[key]; !ok || write.uid == change.UID {
+			delete(index.committed, key)
+		}
+		return
+	}
+	if change.Operation == k8score.OpUpdate && !secretChangeWritesData(change) {
+		return
+	}
+	if write, ok := index.committed[key]; ok && write.uid != change.UID && change.Operation != k8score.OpAdd {
+		return
+	}
+	if pending.write == nil {
+		delete(index.committed, key)
+		return
+	}
+	index.committed[key] = *pending.write
+}
+
+func (index *secretDataManagerWriteIndex) load(namespace, name string) (secretDataManagerWrite, bool) {
+	if index == nil {
+		return secretDataManagerWrite{}, false
+	}
+	index.mu.Lock()
+	defer index.mu.Unlock()
+	write, ok := index.committed[secretWriteKey(namespace, name)]
+	return write, ok
 }
 
 var (
@@ -175,6 +356,7 @@ func InitResourceCache(ctx context.Context) error {
 		// wiring-time value keeps late events truthfully attributed to the
 		// cluster they came from.
 		recordClusterContext := ActiveClusterContext()
+		secretWriteTimes := newSecretDataManagerWriteIndex()
 
 		cfg := k8score.CacheConfig{
 			Client:                  k8sClient,
@@ -192,6 +374,14 @@ func InitResourceCache(ctx context.Context) error {
 
 			OnReceived: func(kind string) {
 				timeline.IncrementReceived(kind)
+			},
+
+			OnTransform: func(obj any) {
+				secretWriteTimes.capture(obj)
+			},
+
+			OnObservedChange: func(change k8score.ResourceChange, obj, _ any) {
+				secretWriteTimes.reconcile(change, obj)
 			},
 
 			OnChange: func(change k8score.ResourceChange, obj, oldObj any) {
@@ -236,9 +426,10 @@ func InitResourceCache(ctx context.Context) error {
 		initialSyncComplete = core.IsSyncComplete()
 
 		resourceCache = &ResourceCache{
-			ResourceCache:  core,
-			secretsEnabled: scopes["secrets"].Enabled,
-			argoDrift:      newArgoDriftTracker(),
+			ResourceCache:    core,
+			secretsEnabled:   scopes["secrets"].Enabled,
+			argoDrift:        newArgoDriftTracker(),
+			secretWriteTimes: secretWriteTimes,
 		}
 	})
 	return initErr
