@@ -28,25 +28,29 @@ import { InvestigationView } from "./InvestigationView";
 import { RecentList } from "./Home";
 import { ConsentCard } from "./parts";
 import { buildLaunchCommand, launchAgentLabel, openInTerminal } from "./launch";
-import { type RunSummary } from "../../api/diagnose";
+import { type RunSummary, type ExecutionProfile } from "../../api/diagnose";
 
 function capWord(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
 // buildConfigLine renders the active AI config as the header subtitle. Codex shows
-// its isolation mode + effective reasoning effort (Default → medium); a model
+// its execution profile + effective reasoning effort (Default → medium); a model
 // override is shown for either agent. Reflects a run's recorded settings, or the
 // current defaults on Home.
 function buildConfigLine(cfg: {
   agent?: string;
-  isolated?: boolean;
+  profile?: ExecutionProfile;
   model?: string;
   effort?: string;
 }): string {
   const parts = [agentLabelFor(cfg.agent ?? "")];
+  if (cfg.profile) {
+    parts.push(
+      cfg.profile === "full-local" ? "Your agent setup" : "Radar safeguards",
+    );
+  }
   if (cfg.agent === "codex") {
-    parts.push(cfg.isolated === false ? "My setup" : "Isolated");
     parts.push(`${capWord(cfg.effort || "medium")} effort`);
   }
   if (cfg.model) parts.push(capWord(cfg.model));
@@ -139,7 +143,8 @@ export function DiagnoseSurface({ topInset = 0 }: { topInset?: number }) {
   const d = useDiagnose();
   // Injected settings action: undefined = Radar's own Settings dialog;
   // null = hide the gear + links.
-  const { consentCopy, onOpenSettings: hostOpenSettings } = useDiagnoseCustomization();
+  const { consentCopy, onOpenSettings: hostOpenSettings } =
+    useDiagnoseCustomization();
   const openSettings =
     hostOpenSettings === undefined ? openDiagnoseSettings : hostOpenSettings;
   const {
@@ -180,12 +185,12 @@ export function DiagnoseSurface({ topInset = 0 }: { topInset?: number }) {
     ? agentLabelFor(activeRun.agent)
     : d.agentLabel;
   // Header subtitle: the config a focused run actually used (it records agent /
-  // isolation / model / effort), or the current defaults on Home. Codex shows mode
+  // profile / model / effort), or the current defaults on Home. Codex shows mode
   // + reasoning effort; model is shown only when overridden. Clicking opens Settings.
   const configLine = buildConfigLine(
     activeRun ?? {
       agent: d.selectedAgent,
-      isolated: d.isolated,
+      profile: d.hosted ? undefined : d.profile,
       model: d.model,
       effort: d.effort,
     },
@@ -208,7 +213,7 @@ export function DiagnoseSurface({ topInset = 0 }: { topInset?: number }) {
         <ConsentCard
           agentName={d.agentLabel}
           agent={d.selectedAgent}
-          isolated={d.isolated}
+          profile={d.profile}
           copy={consentCopy}
           onOpenSettings={openSettings ?? undefined}
           onApprove={d.approveConsent}
