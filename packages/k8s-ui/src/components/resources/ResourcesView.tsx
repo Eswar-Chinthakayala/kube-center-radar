@@ -4,7 +4,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue'
 import { PaneLoader } from '../ui/PaneLoader'
 import { RestrictedState } from '../ui/RestrictedState'
 import { Input } from '../ui/Input'
-import type { TopPodMetrics, TopNodeMetrics } from '../../types'
+import type { TopPodMetrics, TopNodeMetrics, ContainerResourceMetrics } from '../../types'
 import {
   Search,
   RefreshCw,
@@ -6066,27 +6066,74 @@ function PodCell({ resource, column }: { resource: any; column: string }) {
       const ip = resource.status?.podIP || '-'
       return <span className="text-sm text-theme-text-secondary font-mono">{ip}</span>
     }
-    case 'cpu': {
-      const key = `${resource.metadata?.namespace}/${resource.metadata?.name}`
-      const m = metrics.pods.get(key)
-      if (!m || m.cpu === 0) return <span className="text-sm text-theme-text-tertiary">-</span>
-      const denom = m.cpuLimit || m.cpuRequest
-      if (!denom) return <span className="text-sm text-theme-text-secondary font-mono">{formatCPU(m.cpu)}</span>
-      const pct = (m.cpu / denom) * 100
-      const marker = m.cpuLimit > 0 && m.cpuRequest > 0 ? (m.cpuRequest / m.cpuLimit) * 100 : undefined
-      const tip = buildResourceTooltip('CPU', m.cpu, m.cpuRequest, m.cpuLimit, formatCPU)
-      return <ResourceBar used={formatCPU(m.cpu)} total={formatCPU(denom)} percent={pct} colorScheme={getBulletBarScheme(pct, marker)} markerPercent={marker} tooltip={tip} />
-    }
+    case 'cpu':
     case 'memory': {
+      const kind = column as 'cpu' | 'memory'
+      const isCPU = kind === 'cpu'
       const key = `${resource.metadata?.namespace}/${resource.metadata?.name}`
       const m = metrics.pods.get(key)
-      if (!m || m.memory === 0) return <span className="text-sm text-theme-text-tertiary">-</span>
-      const denom = m.memoryLimit || m.memoryRequest
-      if (!denom) return <span className="text-sm text-theme-text-secondary font-mono">{formatMemoryShort(m.memory)}</span>
-      const pct = (m.memory / denom) * 100
-      const marker = m.memoryLimit > 0 && m.memoryRequest > 0 ? (m.memoryRequest / m.memoryLimit) * 100 : undefined
-      const tip = buildResourceTooltip('Memory', m.memory, m.memoryRequest, m.memoryLimit, formatMemoryShort)
-      return <ResourceBar used={formatMemoryShort(m.memory)} total={formatMemoryShort(denom)} percent={pct} colorScheme={getBulletBarScheme(pct, marker)} markerPercent={marker} tooltip={tip} />
+      if (!m) return <span className="text-sm text-theme-text-tertiary">-</span>
+      const label = isCPU ? 'CPU' : 'Memory'
+      const format = isCPU ? formatCPU : formatMemoryShort
+
+      // Multi-container pods carry a per-container breakdown; single-container
+      // pods fall back to the (union-summed) pod-level fields as one synthetic
+      // container so the rest of the logic is uniform.
+      const list: ContainerResourceMetrics[] = (m.containers && m.containers.length > 0)
+        ? m.containers
+        : [{
+            name: resource.spec?.containers?.[0]?.name ?? resource.metadata?.name ?? '',
+            cpu: m.cpu, cpuRequest: m.cpuRequest, cpuLimit: m.cpuLimit,
+            memory: m.memory, memoryRequest: m.memoryRequest, memoryLimit: m.memoryLimit,
+          }]
+
+      const { mode, totalUsage, denom, markerPct, unlimitedCount } = podAggregate(list, kind)
+      if (totalUsage === 0) return <span className="text-sm text-theme-text-tertiary">-</span>
+
+      const tip = buildContainerResourceTooltip(label, list, kind, format)
+
+      // Every container is limited → aggregate bar against the summed limit; a
+      // real pod-level ceiling, so it may go red.
+      if (mode === 'limit') {
+        const pct = denom > 0 ? (totalUsage / denom) * 100 : 0
+        return (
+          <ResourceBar
+            used={format(totalUsage)}
+            total={format(denom)}
+            percent={pct}
+            colorScheme={getBulletBarScheme(pct, markerPct)}
+            markerPercent={markerPct}
+            tooltip={tip}
+          />
+        )
+      }
+
+      // No limits but some requests → neutral bar against the summed request
+      // (no ceiling → never red), no marker.
+      if (mode === 'request') {
+        const pct = denom > 0 ? (totalUsage / denom) * 100 : 0
+        return (
+          <ResourceBar
+            used={format(totalUsage)}
+            total={format(denom)}
+            percent={pct}
+            colorScheme="quiet"
+            tooltip={tip}
+          />
+        )
+      }
+
+      // partial (some limited, some not — the sum is not a real ceiling) or none
+      // (nothing set) → plain usage number plus a faint tag.
+      const tag = mode === 'partial' ? `${unlimitedCount} unbounded` : 'no limit'
+      return (
+        <Tooltip content={tip} delay={200} position="top" wrapperClassName="w-full min-w-0">
+          <span className="inline-flex items-center gap-1.5 min-w-0">
+            <span className="text-sm text-theme-text-secondary font-mono">{format(totalUsage)}</span>
+            <span className="text-[10px] text-theme-text-tertiary shrink-0">{tag}</span>
+          </span>
+        </Tooltip>
+      )
     }
     case 'gpu': {
       const count = getPodGpuCount(resource)
@@ -6609,65 +6656,143 @@ function getBulletBarScheme(_usagePct: number, _markerPct: number | undefined): 
   return 'utilization'
 }
 
-function buildResourceTooltip(
-  type: 'CPU' | 'Memory',
-  usage: number,
-  request: number,
-  limit: number,
+// Max per-container rows shown in the compact cell tooltip before collapsing
+// the tail into a "+N more" line.
+const CONTAINER_TOOLTIP_CAP = 3
+
+// Per-container resource reading. The yardstick is the container's own limit
+// when set, otherwise its request. A limit means an enforced ceiling (usage can
+// be throttled / OOM-killed → the bar may go red); a request-only container has
+// no ceiling, so usage above request is normal and the bar stays neutral.
+type Yardstick = 'limit' | 'request' | 'none'
+
+export function readContainer(c: ContainerResourceMetrics, kind: 'cpu' | 'memory') {
+  const isCPU = kind === 'cpu'
+  const usage = isCPU ? c.cpu : c.memory
+  const limit = isCPU ? c.cpuLimit : c.memoryLimit
+  const request = isCPU ? c.cpuRequest : c.memoryRequest
+  let yardstick: Yardstick = 'none'
+  let denom = 0
+  if (limit > 0) {
+    yardstick = 'limit'
+    denom = limit
+  } else if (request > 0) {
+    yardstick = 'request'
+    denom = request
+  }
+  const pct = denom > 0 ? (usage / denom) * 100 : -1
+  return { usage, limit, request, yardstick, denom, pct }
+}
+
+interface PodAggregate {
+  // limit: every container is limited → a real ceiling exists (bar vs summed
+  // limit). partial: some containers limited, some not → the sum is not a true
+  // ceiling, so plain usage + an "unbounded" tag. request: no limits but some
+  // requests → neutral bar vs summed request. none: nothing set → plain usage.
+  mode: 'limit' | 'partial' | 'request' | 'none'
+  totalUsage: number
+  /** summed limit (limit mode) or summed request (request mode); 0 otherwise. */
+  denom: number
+  /** request marker as % of summed limit; limit mode only. */
+  markerPct?: number
+  /** number of containers with no limit set. */
+  unlimitedCount: number
+}
+
+// podAggregate reduces a pod's containers to the aggregate the compact cell
+// headline renders — total usage measured against a pod-level yardstick. It
+// keeps the dominant consumer visible instead of demoting it behind a small
+// limited container, and stays honest about partial limits (which don't form a
+// real ceiling).
+export function podAggregate(list: ContainerResourceMetrics[], kind: 'cpu' | 'memory'): PodAggregate {
+  const isCPU = kind === 'cpu'
+  let totalUsage = 0
+  let limitedCount = 0
+  let requestedCount = 0
+  let unlimitedCount = 0
+  let summedLimit = 0
+  let summedRequest = 0
+  for (const c of list) {
+    const usage = isCPU ? c.cpu : c.memory
+    const limit = isCPU ? c.cpuLimit : c.memoryLimit
+    const request = isCPU ? c.cpuRequest : c.memoryRequest
+    totalUsage += usage
+    if (limit > 0) {
+      limitedCount++
+      summedLimit += limit
+    } else {
+      unlimitedCount++
+    }
+    if (request > 0) {
+      requestedCount++
+      summedRequest += request
+    }
+  }
+  const allLimited = list.length > 0 && limitedCount === list.length
+  if (allLimited) {
+    return {
+      mode: 'limit',
+      totalUsage,
+      denom: summedLimit,
+      markerPct: summedRequest > 0 ? (summedRequest / summedLimit) * 100 : undefined,
+      unlimitedCount,
+    }
+  }
+  if (limitedCount > 0) {
+    return { mode: 'partial', totalUsage, denom: 0, unlimitedCount }
+  }
+  if (requestedCount > 0) {
+    return { mode: 'request', totalUsage, denom: summedRequest, unlimitedCount }
+  }
+  return { mode: 'none', totalUsage, denom: 0, unlimitedCount }
+}
+
+// buildContainerResourceTooltip renders one row per container — usage against
+// its OWN yardstick (limit if set, otherwise request) and percentage — sorted
+// by pct descending, intermixing limited and request-only. Containers with
+// neither render the words "no limit". Capped at CONTAINER_TOOLTIP_CAP rows,
+// with a final "+N more" line pointing at the pod.
+function buildContainerResourceTooltip(
+  label: 'CPU' | 'Memory',
+  containers: ContainerResourceMetrics[],
+  kind: 'cpu' | 'memory',
   formatFn: (n: number) => string,
 ) {
-  const isCPU = type === 'CPU'
-
-  let guidance: string
-  if (limit > 0 && request > 0) {
-    const pctOfLimit = (usage / limit) * 100
-    if (pctOfLimit > 90) {
-      guidance = isCPU
-        ? 'Near the limit — CPU may be throttled'
-        : 'Near the limit — at risk of OOM kill'
-    } else if (usage > request) {
-      guidance = 'Exceeds request — consider raising it if sustained'
-    } else {
-      guidance = 'Below request — healthy headroom'
-    }
-  } else if (limit > 0) {
-    const pctOfLimit = (usage / limit) * 100
-    if (pctOfLimit > 90) {
-      guidance = isCPU
-        ? 'Near the limit — CPU may be throttled'
-        : 'Near the limit — at risk of OOM kill'
-    } else {
-      guidance = 'No request set — scheduling may be suboptimal'
-    }
-  } else if (request > 0) {
-    guidance = usage > request
-      ? `Exceeds request with no limit — unbounded ${isCPU ? 'CPU' : 'memory'} access`
-      : 'No limit set — pod can burst beyond request'
-  } else {
-    guidance = 'No request or limit configured'
-  }
+  const rows = [...containers].sort((a, b) => {
+    const diff = readContainer(b, kind).pct - readContainer(a, kind).pct
+    return diff !== 0 ? diff : a.name.localeCompare(b.name)
+  })
+  const shown = rows.slice(0, CONTAINER_TOOLTIP_CAP)
+  const remaining = rows.length - shown.length
 
   return (
-    <div className="whitespace-normal w-52 flex flex-col gap-1.5 py-0.5">
-      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs font-mono">
-        <span className="text-theme-text-tertiary">Usage</span>
-        <span className="text-theme-text-primary">{formatFn(usage)}</span>
-        {request > 0 && (
-          <>
-            <span className="text-theme-text-tertiary">Request</span>
-            <span className="text-theme-text-primary">{formatFn(request)}</span>
-          </>
-        )}
-        {limit > 0 && (
-          <>
-            <span className="text-theme-text-tertiary">Limit</span>
-            <span className="text-theme-text-primary">{formatFn(limit)}</span>
-          </>
-        )}
+    <div className="whitespace-normal w-72 flex flex-col gap-2 py-0.5">
+      <div className="text-[11px] text-theme-text-tertiary uppercase tracking-wide">{label} by container</div>
+      <div className="flex flex-col gap-2">
+        {shown.map((c) => {
+          const r = readContainer(c, kind)
+          // Container name on its own line, the numbers below it. Limited
+          // containers also show the request (the tooltip is the detail
+          // surface and shouldn't drop it); request-only/unset show their
+          // single yardstick or "no limit".
+          const detail = r.yardstick === 'limit'
+            ? `${formatFn(r.usage)} · ${Math.round(r.pct)}% · ${formatFn(r.denom)} limit${r.request > 0 ? ` · req ${formatFn(r.request)}` : ''}`
+            : r.yardstick === 'request'
+              ? `${formatFn(r.usage)} · ${Math.round(r.pct)}% · ${formatFn(r.denom)} request`
+              : `${formatFn(r.usage)} · no limit`
+          return (
+            <div key={c.name} className="flex flex-col leading-snug">
+              <span className="text-[11px] text-theme-text-tertiary truncate">{c.name}</span>
+              <span className="text-xs font-mono text-theme-text-primary">{detail}</span>
+            </div>
+          )
+        })}
       </div>
-      <div className="text-[11px] text-theme-text-secondary border-t border-theme-border/50 pt-1">
-        {guidance}
-      </div>
+      {remaining > 0 && (
+        <div className="text-[11px] text-theme-text-tertiary border-t border-theme-border/50 pt-1">
+          +{remaining} more → open pod
+        </div>
+      )}
     </div>
   )
 }
