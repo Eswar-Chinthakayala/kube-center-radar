@@ -162,7 +162,7 @@ function BrandRow({ pinned, onNavigate }: { pinned: boolean; onNavigate: (view: 
     <button
       type="button"
       onClick={() => onNavigate('home')}
-      aria-label="Radar — go to home"
+      aria-label="Kube Center — go to home"
       // Height matches the top bar header (App.tsx — items-center + py-2 = 51px)
       // so the rail's brand divider and the header's bottom border form one line.
       className="flex h-[51px] w-full items-center border-b border-theme-border/50 shrink-0 transition-opacity hover:opacity-80"
@@ -174,13 +174,12 @@ function BrandRow({ pinned, onNavigate }: { pinned: boolean; onNavigate: (view: 
             alt=""
             aria-hidden
             className="w-full h-full p-0.5"
-            onError={(e) => console.error('Radar logo asset failed to load:', (e.currentTarget as HTMLImageElement).src)}
+            onError={(e) => console.error('Kube Center logo asset failed to load:', (e.currentTarget as HTMLImageElement).src)}
           />
         </span>
       </span>
       <span className={clsx('flex flex-col leading-none text-left', !pinned && 'opacity-0 pointer-events-none')}>
-        <span className="font-semibold text-[15px] tracking-tight text-theme-text-primary">Radar</span>
-        <span className="text-[9px] mt-0.5 tracking-wide uppercase text-theme-text-tertiary">by Skyhook</span>
+        <span className="font-semibold text-[15px] tracking-tight text-theme-text-primary">Kube Center</span>
       </span>
     </button>
     </Tooltip>

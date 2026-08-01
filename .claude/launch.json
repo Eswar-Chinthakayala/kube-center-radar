@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kube-center",
+      "runtimeExecutable": "./radar",
+      "runtimeArgs": ["--no-browser", "--port", "9280"],
+      "port": 9280
+    },
+    {
+      "name": "kube-center-dev-frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd web && npm run dev"],
+      "port": 9273
+    }
+  ]
+}

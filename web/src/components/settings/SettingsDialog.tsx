@@ -359,8 +359,7 @@ export function SettingsDialog({
             <div className="flex items-baseline gap-2">
               <h2 className="text-lg font-semibold text-theme-text-primary">Settings</h2>
               <span className="text-[11px] text-theme-text-tertiary">
-                Radar{versionInfo?.currentVersion ? ` v${versionInfo.currentVersion}` : ''}
-                <span className="text-theme-text-disabled"> · by Skyhook</span>
+                Kube Center{versionInfo?.currentVersion ? ` v${versionInfo.currentVersion}` : ''}
               </span>
             </div>
           </div>
@@ -965,7 +964,7 @@ function AIUnavailableNotice() {
       <p className="text-sm font-medium text-theme-text-primary">No supported agent CLI found</p>
       <p className="mt-1 text-xs text-theme-text-tertiary">
         Install <span className="text-theme-text-secondary">Claude Code</span> or{' '}
-        <span className="text-theme-text-secondary">Codex</span>, then restart Radar — this tab
+        <span className="text-theme-text-secondary">Codex</span>, then restart Kube Center — this tab
         will show the agent, model, and effort controls.
       </p>
     </div>
