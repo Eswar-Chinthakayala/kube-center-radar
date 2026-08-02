@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Settings, X, RotateCcw, RotateCw, Loader2, Copy, Check, Pin, Shield, Lock, Plug,
   Plus, Terminal, Boxes, Activity, GitBranch, Sparkles, SlidersHorizontal, Zap,
-  LayoutDashboard, ChevronRight, ExternalLink, Download, AlertTriangle,
+  LayoutDashboard, ChevronRight, ExternalLink, Download, AlertTriangle, Upload,
   type LucideIcon,
 } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -12,6 +12,7 @@ import { TRANSITION_BACKDROP, TRANSITION_PANEL } from '../../utils/animation'
 import { apiUrl, getAuthHeaders, getCredentialsMode } from '../../api/config'
 import {
   useCloudRole, useVersionCheck, useClusterInfo, usePrometheusStatus, useArgoStatus,
+  useImportKubeconfig,
 } from '../../api/client'
 import { useCapabilitiesContext } from '../../contexts/CapabilitiesContext'
 import { Input } from '@skyhook-io/k8s-ui'
@@ -1008,7 +1009,117 @@ function ClusterSection({
         placeholder="All namespaces"
         onChange={(v) => onChange('namespace', v || undefined)}
       />
+      <ImportKubeconfigCard />
     </>
+  )
+}
+
+type ImportState =
+  | { status: 'idle' }
+  | { status: 'importing' }
+  | { status: 'done'; added: string[]; count: number }
+  | { status: 'error'; error: string }
+
+function ImportKubeconfigCard() {
+  const [expanded, setExpanded] = useState(false)
+  const [yaml, setYaml] = useState('')
+  const [state, setState] = useState<ImportState>({ status: 'idle' })
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const importKubeconfig = useImportKubeconfig()
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      setYaml((ev.target?.result as string) || '')
+      setState({ status: 'idle' })
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
+  const handleImport = async () => {
+    if (!yaml.trim()) return
+    setState({ status: 'importing' })
+    try {
+      const result = await importKubeconfig.mutateAsync(yaml.trim())
+      setState({ status: 'done', added: result.added, count: result.count })
+      setYaml('')
+    } catch (err) {
+      setState({ status: 'error', error: err instanceof Error ? err.message : 'Unknown error' })
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-theme-border overflow-hidden">
+      <button
+        type="button"
+        onClick={() => { setExpanded(v => !v); setState({ status: 'idle' }) }}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-theme-text-primary hover:bg-theme-hover transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <Upload className="w-4 h-4 text-theme-text-secondary" />
+          Import kubeconfig
+        </span>
+        <ChevronRight className={clsx('w-4 h-4 text-theme-text-tertiary transition-transform', expanded && 'rotate-90')} />
+      </button>
+
+      {expanded && (
+        <div className="border-t border-theme-border px-3 py-3 space-y-3 bg-theme-base">
+          <p className="text-xs text-theme-text-tertiary">
+            Paste or upload a kubeconfig file. New contexts will be merged into your{' '}
+            <code className="text-[11px] bg-theme-elevated px-1 py-0.5 rounded">~/.kube/config</code> immediately — no restart needed.
+          </p>
+
+          <textarea
+            value={yaml}
+            onChange={e => { setYaml(e.target.value); setState({ status: 'idle' }) }}
+            placeholder={'apiVersion: v1\nkind: Config\nclusters: ...'}
+            rows={6}
+            className="w-full bg-theme-elevated border border-theme-border rounded text-xs font-mono text-theme-text-primary placeholder:text-theme-text-tertiary p-2.5 focus:outline-none focus:border-skyhook-500 resize-none"
+          />
+
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded bg-theme-elevated border border-theme-border text-theme-text-secondary hover:bg-theme-hover transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Upload file
+            </button>
+            <input ref={fileInputRef} type="file" accept=".yaml,.yml,.kubeconfig,*" className="hidden" onChange={handleFileChange} />
+
+            <button
+              type="button"
+              onClick={handleImport}
+              disabled={!yaml.trim() || state.status === 'importing'}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium btn-brand rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {state.status === 'importing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Import
+            </button>
+          </div>
+
+          {state.status === 'done' && (
+            state.count === 0 ? (
+              <p className="text-xs text-amber-600 dark:text-amber-400/80">
+                No new contexts — all already exist in your kubeconfig.
+              </p>
+            ) : (
+              <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400/80">
+                <Check className="w-3 h-3 shrink-0" />
+                Added {state.count} context{state.count !== 1 ? 's' : ''}: {state.added.join(', ')}
+              </p>
+            )
+          )}
+          {state.status === 'error' && (
+            <p className="text-xs text-red-600 dark:text-red-400/80">{state.error}</p>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
