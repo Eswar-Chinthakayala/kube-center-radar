@@ -104,6 +104,9 @@ func main() {
 	noMCP := flag.Bool("no-mcp", !fileCfg.MCPEnabledOr(true), "Disable MCP (Model Context Protocol) server for AI tools")
 	mcpCatalogStdio := flag.Bool("mcp-catalog-stdio", false, "Start only the MCP catalog over stdio for registry/inspector introspection; skips Kubernetes initialization")
 	mcpCatalogOnly := flag.Bool("mcp-catalog-only", false, "Start only the MCP endpoint for registry/inspector catalog introspection; skips Kubernetes initialization")
+	// Projects / multi-tenancy flags
+	databaseURL := flag.String("database-url", os.Getenv("RADAR_DATABASE_URL"), "Postgres DSN for the projects/users store (e.g. postgres://user:pass@host:5432/db). Enables the admin panel and multi-tenancy. Env: RADAR_DATABASE_URL")
+	redisAddr := flag.String("redis-addr", os.Getenv("RADAR_REDIS_ADDR"), "Redis address for session store (host:port). Defaults to localhost:6379 when --database-url is set. Env: RADAR_REDIS_ADDR")
 	// Auth flags
 	authMode := flag.String("auth-mode", "none", "Authentication mode: none, proxy, or oidc")
 	authSecret := flag.String("auth-secret", "", "HMAC secret key for session cookies (auto-generated if empty)")
@@ -276,6 +279,8 @@ func main() {
 		AIHistory:                *aiHistory,
 		AIHistoryDBPath:          fileCfg.AIHistoryDBPath,
 		Version:                  version,
+		DatabaseURL: *databaseURL,
+		RedisAddr:   *redisAddr,
 		AuthConfig: auth.Config{
 			Mode:                      *authMode,
 			Secret:                    *authSecret,

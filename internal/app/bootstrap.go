@@ -64,6 +64,8 @@ type AppConfig struct {
 	AIHistory                bool   // persist AI investigations across restarts
 	AIHistoryDBPath          string // "" = ~/.radar/ai-runs.db
 	AuthConfig               auth.Config
+	DatabaseURL              string // Postgres DSN; empty disables projects feature
+	RedisAddr                string // host:port; defaults to localhost:6379 when DatabaseURL is set
 }
 
 // SetGlobals applies debug/test flags to global state.
@@ -285,7 +287,9 @@ func CreateServer(cfg AppConfig) *server.Server {
 			HasPrometheusURL:     cfg.PrometheusURL != "",
 			HasPrometheusHeaders: len(cfg.PrometheusHeaders) > 0,
 		},
-		AuthConfig: cfg.AuthConfig,
+		AuthConfig:  cfg.AuthConfig,
+		DatabaseURL: cfg.DatabaseURL,
+		RedisAddr:   cfg.RedisAddr,
 	}
 
 	// AI-history DB path: resolved here (like the timeline DB) so the server
