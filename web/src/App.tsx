@@ -23,6 +23,10 @@ import { HelmCompareRoute } from './components/helm/HelmCompareRoute'
 import { TrafficView } from './components/traffic/TrafficView'
 import { CostView } from './components/cost/CostView'
 import { AuditView } from './components/audit/AuditView'
+import { AdminView } from './components/admin/AdminView'
+import { NodesView } from './components/nodes/NodesView'
+import { PendingApprovalScreen } from './components/admin/PendingApproval'
+import { useKCUser } from './api/client'
 import { IssuesPane } from './components/issues/IssuesPane'
 import { GitOpsView } from './components/gitops/GitOpsView'
 import { ApplicationsView } from './components/applications/ApplicationsView'
@@ -55,7 +59,7 @@ import { useAnimatedUnmount } from './hooks/useAnimatedUnmount'
 import { useDocumentTitle } from './hooks/useDocumentTitle'
 import type { ClusterLoadState } from './types/clusterLoadState'
 import { useClusterLoadState } from './hooks/useClusterLoadState'
-import { Network, List, Clock, Package, Sun, Moon, Activity, Home, Search, Bug, SquareTerminal, ShieldCheck, GitBranch, HelpCircle, Loader2, RefreshCw } from 'lucide-react'
+import { Network, List, Clock, Package, Sun, Moon, Activity, Home, Search, Bug, SquareTerminal, ShieldCheck, GitBranch, HelpCircle, Loader2, RefreshCw, Server } from 'lucide-react'
 import { useTheme } from './context/ThemeContext'
 import { Tooltip } from './components/ui/Tooltip'
 import { LargeClusterNamespacePicker } from './components/shared/LargeClusterNamespacePicker'
@@ -113,7 +117,7 @@ const FLEET_MODE_KINDS = new Set<NodeKind>([
 
 // Convert API resource name back to topology node ID prefix
 // Extended MainView type that includes traffic and cost
-type ExtendedMainView = MainView | 'traffic' | 'cost' | 'workload' | 'checks' | 'gitops' | 'compare' | 'helmCompare' | 'issues' | 'applications'
+type ExtendedMainView = MainView | 'traffic' | 'cost' | 'workload' | 'checks' | 'gitops' | 'compare' | 'helmCompare' | 'issues' | 'applications' | 'admin' | 'nodes'
 
 // Extract view from URL path
 function getViewFromPath(pathname: string): ExtendedMainView {
@@ -132,6 +136,8 @@ function getViewFromPath(pathname: string): ExtendedMainView {
   if (path === 'applications') return 'applications'
   if (path === 'compare') return 'compare'
   if (path === 'issues') return 'issues'
+  if (path === 'admin') return 'admin'
+  if (path === 'nodes') return 'nodes'
   return 'home'
 }
 
@@ -784,7 +790,7 @@ function AppInner({ manageDocumentTitle = false, documentTitleSuffix, onClusterL
   const VIEW_SHORTCUT_KEYS: Record<ExtendedMainView, string> = {
     home: 'g h', resources: 'g r', issues: 'g i', topology: 'g t',
     applications: 'g a', timeline: 'g l', traffic: 'g f', helm: 'g m',
-    gitops: 'g o', checks: 'g u', cost: 'g c',
+    gitops: 'g o', checks: 'g u', cost: 'g c', admin: 'g d', nodes: 'g n',
     // Non-rail views (reachable via deep links / actions, not the rail) get no
     // dedicated mnemonic — listed for exhaustiveness so the type stays total.
     workload: '', compare: '', helmCompare: '',
@@ -1728,6 +1734,7 @@ function AppInner({ manageDocumentTitle = false, documentTitleSuffix, onClusterL
             { view: 'home' as const, icon: Home, label: 'Home' },
             { view: 'topology' as const, icon: Network, label: 'Topology' },
             { view: 'resources' as const, icon: List, label: 'Resources' },
+            { view: 'nodes' as const, icon: Server, label: 'Nodes' },
             { view: 'timeline' as const, icon: Clock, label: 'Timeline' },
             { view: 'helm' as const, icon: Package, label: 'Helm' },
             { view: 'gitops' as const, icon: GitBranch, label: 'GitOps' },
@@ -1977,6 +1984,8 @@ function AppInner({ manageDocumentTitle = false, documentTitleSuffix, onClusterL
           cover already blocks pointer events). */}
       {contentReady && <div className="flex-1 flex overflow-hidden" inert={expandedView}>
         <ErrorBoundary>
+        {/* Pending approval — projects enabled, user has no access yet */}
+        <PendingGate>
         {/* Home dashboard */}
         {mainView === 'home' && (
           <HomeView
@@ -2231,6 +2240,18 @@ function AppInner({ manageDocumentTitle = false, documentTitleSuffix, onClusterL
           <CostView namespaces={namespaces} onBack={() => setMainView('home')} onOpenResource={navigateToResource} />
         )}
 
+        {/* Admin view — projects, users, audit (Kube Center enterprise) */}
+        {mainView === 'admin' && <AdminView />}
+
+        {mainView === 'nodes' && (
+          <NodesView
+            onResourceClick={navigateToResource}
+            namespaces={namespaces}
+          />
+        )}
+
+        {/* --- Shared/Generic Detail Drawers --- */}
+
         {/* Takeover splash. When the host claims the current view via
             fleetTakeoverHref, the redirect effect above is mid-flight — render a
             brief splash instead of the inline view (which would flash + fire its
@@ -2278,6 +2299,7 @@ function AppInner({ manageDocumentTitle = false, documentTitleSuffix, onClusterL
         {/* Compare two resources of the same kind side-by-side */}
         {mainView === 'compare' && <CompareViewRoute />}
 
+        </PendingGate>
         </ErrorBoundary>
       </div>}
       </div>{/* /body frame */}
@@ -2506,7 +2528,7 @@ function Logo() {
     <div className="flex items-center gap-2.5">
       <div className="relative w-7 h-7 rounded-lg overflow-hidden flex-shrink-0 bg-emerald-500/10 border border-emerald-500/20">
         <img
-          src="/images/radar/radar-icon.svg"
+          src="/images/kubecenter/icon.svg"
           alt=""
           aria-hidden
           className="w-full h-full p-0.5"
@@ -2528,6 +2550,25 @@ function Logo() {
 
 // GitHub star button with live star count + programmatic starring via gh CLI
 
+
+// PendingGate — intercepts the content area when projects are enabled and the
+// current user has no access yet (no project memberships, not super admin).
+// The admin /admin route always passes through so super admins can still act.
+function PendingGate({ children }: { children: React.ReactNode }) {
+  const { data: kcUser, isLoading } = useKCUser()
+  const location = useLocation()
+
+  // Don't intercept while loading, or if projects aren't enabled
+  if (isLoading || !kcUser?.projectsEnabled) return <>{children}</>
+  // Super admins always pass through
+  if (kcUser.globalRole === 'super_admin') return <>{children}</>
+  // Users with at least one project assignment pass through
+  if (kcUser.projects && kcUser.projects.length > 0) return <>{children}</>
+  // /admin route passes through (shouldn't be reachable but belt+suspenders)
+  if (location.pathname.startsWith('/admin')) return <>{children}</>
+
+  return <PendingApprovalScreen />
+}
 
 // Theme toggle button component
 function ThemeToggle() {

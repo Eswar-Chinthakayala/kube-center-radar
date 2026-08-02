@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { RadarApp } from './RadarApp'
+import { LoginPage, SignupPage, PendingApprovalPage } from './components/auth/LoginPage'
 import { openExternal } from './utils/navigation'
 import './index.css'
 
@@ -153,8 +154,21 @@ window.addEventListener('mouseup', (e: MouseEvent) => {
 // tab, so it opts into per-view document.title. Library consumers (e.g.
 // radar-hub-web) render <RadarApp apiBase="..." basename="..." /> WITHOUT this
 // flag, keeping their own tab title.
+// Route standalone auth pages before mounting the full app shell.
+// These pages are full-screen and have no nav — they live outside RadarApp.
+const path = window.location.pathname
+let root: React.ReactNode
+
+if (path === '/login') {
+  root = <LoginPage />
+} else if (path === '/signup') {
+  root = <SignupPage />
+} else if (path === '/pending') {
+  root = <PendingApprovalPage />
+} else {
+  root = <RadarApp manageDocumentTitle />
+}
+
 ReactDOM.createRoot(document.getElementById('radar')!).render(
-  <React.StrictMode>
-    <RadarApp manageDocumentTitle />
-  </React.StrictMode>
+  <React.StrictMode>{root}</React.StrictMode>
 )

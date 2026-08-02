@@ -534,3 +534,46 @@ probes:
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Backing Services (Sub-charts via Bitnami)
+# ──────────────────────────────────────────────────────────────────────────────
+
+postgresql:
+  enabled: true
+  auth:
+    database: kubecenter
+    username: kubecenter
+    password: kubecenter_dev
+  primary:
+    persistence:
+      enabled: false
+
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+  replica:
+    replicaCount: 0
+
+rabbitmq:
+  enabled: true
+  auth:
+    username: kubecenter
+    password: kubecenter_dev
+  persistence:
+    enabled: false
+
+keycloak:
+  enabled: true
+  auth:
+    adminUser: admin
+    adminPassword: admin
+  production: false
+  proxy: edge
+  # Note: A real deployment would want an init-container or job to seed the realm
+  # config, similar to `start-dev --import-realm` in the docker-compose setup.
+  # For the helm chart, we'll keep it simple for now and rely on manual/job import.

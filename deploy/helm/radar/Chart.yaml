@@ -51,3 +51,20 @@ annotations:
   artifacthub.io/maintainers: |
     - name: Skyhook
       email: support@skyhook.io
+dependencies:
+  - name: postgresql
+    version: 15.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: 19.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+  - name: rabbitmq
+    version: 14.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: rabbitmq.enabled
+  - name: keycloak
+    version: 22.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: keycloak.enabled

@@ -220,6 +220,18 @@ spec:
             - name: MY_DEPLOYMENT_NAME
               value: {{ include "radar.fullname" . }}
             {{- end }}
+            {{- if .Values.postgresql.enabled }}
+            - name: DATABASE_URL
+              value: "postgres://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ .Release.Name }}-postgresql:5432/{{ .Values.postgresql.auth.database }}?sslmode=disable"
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_ADDR
+              value: "{{ .Release.Name }}-redis-master:6379"
+            {{- end }}
+            {{- if .Values.rabbitmq.enabled }}
+            - name: AMQP_URL
+              value: "amqp://{{ .Values.rabbitmq.auth.username }}:{{ .Values.rabbitmq.auth.password }}@{{ .Release.Name }}-rabbitmq:5672/"
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

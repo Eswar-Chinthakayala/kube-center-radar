@@ -1,14 +1,15 @@
 import type { ComponentType } from 'react'
 import type { ReactNode } from 'react'
-import { Home, Network, List, Clock, AlertTriangle, Package, GitBranch, Boxes, Activity, DollarSign, ShieldCheck, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Home, Network, List, Clock, AlertTriangle, Package, GitBranch, Boxes, Activity, DollarSign, ShieldCheck, Settings, PanelLeftClose, PanelLeftOpen, LayoutDashboard, Server } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { MainView } from '../../types'
 import { Tooltip } from '../ui/Tooltip'
+import { useKCUser } from '../../api/client'
 
 // The views the rail can navigate to. Broader than k8s-ui's ExtendedMainView
 // (which omits 'applications') — it mirrors the navigable subset of App.tsx's
 // own view union, so onNavigate accepts App's setMainView directly.
-type NavRailView = MainView | 'issues' | 'traffic' | 'gitops' | 'applications' | 'cost' | 'checks'
+type NavRailView = MainView | 'issues' | 'traffic' | 'gitops' | 'applications' | 'cost' | 'checks' | 'admin' | 'nodes'
 
 // Primary left nav rail for standalone (non-embedded) Radar.
 //
@@ -42,6 +43,7 @@ const NAV_ITEMS: NavItemDef[] = [
   { view: 'home', icon: Home, label: 'Home' },
   { view: 'resources', icon: List, label: 'Resources' },
   { view: 'issues', icon: AlertTriangle, label: 'Issues' },
+  { view: 'nodes', icon: Server, label: 'Nodes' },
   { view: 'topology', icon: Network, label: 'Topology' },
   { view: 'applications', icon: Boxes, label: 'Applications' },
   { view: 'timeline', icon: Clock, label: 'Timeline' },
@@ -72,6 +74,10 @@ interface PrimaryNavRailProps {
 }
 
 export function PrimaryNavRail({ activeView, onNavigate, pinned, onTogglePinned, showPinToggle = true, onOpenSettings, accountSlot }: PrimaryNavRailProps) {
+  const { data: kcUser } = useKCUser()
+  const showAdmin = kcUser?.projectsEnabled &&
+    (kcUser.globalRole === 'super_admin' || (kcUser.projects && kcUser.projects.length > 0))
+
   return (
     <aside
       aria-label="Primary navigation"
@@ -112,6 +118,14 @@ export function PrimaryNavRail({ activeView, onNavigate, pinned, onTogglePinned,
             onNavigate={onNavigate}
           />
         ))}
+        {showAdmin && (
+          <NavRailItem
+            item={{ view: 'admin', icon: LayoutDashboard, label: 'Admin' }}
+            active={activeView === 'admin'}
+            pinned={pinned}
+            onNavigate={onNavigate}
+          />
+        )}
       </nav>
 
       {!pinned && <div className="flex-1" />}
@@ -170,7 +184,7 @@ function BrandRow({ pinned, onNavigate }: { pinned: boolean; onNavigate: (view: 
       <span className="flex w-14 shrink-0 items-center justify-center">
         <span className="relative w-7 h-7 rounded-lg overflow-hidden bg-emerald-500/10 border border-emerald-500/20">
           <img
-            src="/images/radar/radar-icon.svg"
+            src="/images/kubecenter/icon.svg"
             alt=""
             aria-hidden
             className="w-full h-full p-0.5"

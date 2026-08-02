@@ -86,6 +86,15 @@ dev:
 	@echo ""
 	@echo "Frontend proxies API calls to backend automatically."
 
+# Secure development mode (requires docker-compose up for keycloak)
+dev-secure:
+	@echo "=== Enterprise Secure Development Mode ==="
+	@echo ""
+	@echo "Run these in separate terminals:"
+	@echo "  Terminal 1: make watch-frontend"
+	@echo "  Terminal 2: make watch-backend-secure"
+	@echo ""
+
 # Frontend with Vite hot reload
 watch-frontend:
 	cd web && npm run dev
@@ -95,6 +104,18 @@ watch-frontend:
 watch-backend:
 	@command -v air >/dev/null 2>&1 || { echo "Installing air..."; go install github.com/air-verse/air@latest; }
 	air -- $(RADAR_FLAGS)
+
+# Backend with OIDC Authentication enforced (Enterprise Ready)
+watch-backend-secure:
+	@echo "Loading .env and enforcing Keycloak OIDC Authentication..."
+	@set -a; source .env; set +a; \
+	go run -ldflags "$(LDFLAGS)" ./cmd/explorer --auth-mode=oidc \
+	  --auth-oidc-issuer=$$OIDC_ISSUER \
+	  --auth-oidc-client-id=$$OIDC_CLIENT_ID \
+	  --auth-oidc-client-secret=$$OIDC_CLIENT_SECRET \
+	  --auth-oidc-redirect-url=$$OIDC_REDIRECT_URL \
+	  --auth-oidc-post-logout-redirect-url=$$OIDC_POST_LOGOUT_URL \
+	  --auth-oidc-scopes=openid,profile,email $(RADAR_FLAGS)
 
 # Run built binary
 run:

@@ -1,0 +1,458 @@
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Tokens ──────────────────────────────────────────────────────────────── */
+:root {
+  --bg:        #f9fafb;
+  --surface:   #ffffff;
+  --elevated:  #f3f4f6;
+  --border:    #e5e7eb;
+  --text:      #111827;
+  --text-2:    #4b5563;
+  --text-3:    #9ca3af;
+  --accent:    #10b981;
+  --accent-h:  #059669;
+  --danger:    #ef4444;
+  --radius:    12px;
+}
+
+body {
+  background: var(--surface);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+
+/* ── Card wrapper ────────────────────────────────────────────────────────── */
+#kc-container-wrapper, .kc-container-wrapper { width: 100%; }
+
+#kc-content, .login-pf-page { all: unset; display: flex; }
+
+.kc-login-toolbar, #kc-locale { display: none; }
+
+/* ── Card ────────────────────────────────────────────────────────────────── */
+#kc-form-wrapper, .card-pf {
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  box-shadow: none;
+}
+
+/* ── Logo / Header ───────────────────────────────────────────────────────── */
+#kc-header, .login-pf-header {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 32px;
+}
+
+#kc-header-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-direction: row;
+}
+
+/* Logo mark */
+#kc-header-wrapper::before {
+  content: '';
+  display: block;
+  width: 44px;
+  height: 44px;
+  background: var(--accent);
+  border-radius: 10px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'/%3E%3Cpath d='M2 12h20'/%3E%3C/svg%3E");
+  background-size: 24px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+#kc-header-wrapper span {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text);
+}
+
+/* ── Page title ──────────────────────────────────────────────────────────── */
+#kc-page-title, h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: left;
+  margin-bottom: 12px;
+  letter-spacing: -0.5px;
+}
+
+.kc-page-subtitle {
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* ── Form groups ─────────────────────────────────────────────────────────── */
+.kc-form-group, .form-group {
+  margin-bottom: 24px;
+  width: 100%;
+}
+
+/* Force Keycloak grid columns to 100% width so inputs aren't cut off */
+.kc-split-right [class*="col-"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  flex: 0 0 100% !important;
+}
+
+/* Fix label stacking by making it inline-block instead of block */
+label {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+/* Hide the ugly asterisk universally */
+.kc-split-right span:contains('*'), 
+.kc-split-right .pficon-asterisk,
+.kc-split-right .kc-asterisk,
+.kc-split-right span.required {
+  display: none !important;
+}
+
+/* Hack to hide raw text node '*' in register.ftl */
+.kc-split-right .kc-form-group > div:first-child {
+  color: transparent !important;
+  font-size: 0px !important;
+}
+.kc-split-right .kc-form-group > div:first-child label {
+  color: var(--text-2) !important;
+  font-size: 13px !important;
+}
+
+/* ── Validation Errors ───────────────────────────────────────────────────── */
+.pf-c-form__helper-text, .kc-feedback-text, span[id^="input-error"], .kc-split-right span:not(.pf-c-button span) {
+  display: block;
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: 6px;
+  font-weight: 500;
+}
+/* Ensure the "Back to Login" text isn't styled as an error */
+#kc-form-options span {
+  color: inherit;
+  font-size: inherit;
+  margin-top: 0;
+  display: inline;
+}
+
+/* Hide the password visibility eye icon if it's breaking layout */
+.kc-split-right button[aria-label="Show password"],
+.kc-split-right button[aria-label="Hide password"],
+.kc-split-right .pf-c-button.pf-m-control {
+  display: none !important;
+}
+
+/* ── Inputs ──────────────────────────────────────────────────────────────── */
+.kc-input, input[type="text"], input[type="email"],
+input[type="password"], input[type="tel"] {
+  display: block;
+  width: 100% !important;
+  background: var(--elevated);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 15px;
+  padding: 13px 16px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+}
+
+.kc-input:focus, input[type="text"]:focus,
+input[type="email"]:focus, input[type="password"]:focus,
+input[type="tel"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(16,185,129,0.12);
+}
+
+.kc-input[aria-invalid="true"],
+input[aria-invalid="true"] {
+  border-color: var(--danger) !important;
+  background-color: #fef2f2 !important;
+}
+
+input::placeholder { color: var(--text-3); }
+
+/* OTP digit inputs */
+input[type="text"][autocomplete="one-time-code"],
+input[id*="otp"], input[name*="otp"] {
+  letter-spacing: 0.35em;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.kc-button, .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 9px 16px;
+  transition: opacity 0.15s, background 0.15s;
+  text-decoration: none;
+}
+
+.kc-button-primary, .btn-primary, input[type="submit"] {
+  background: var(--accent);
+  color: #fff;
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.kc-button-primary:hover, .btn-primary:hover, input[type="submit"]:hover {
+  background: var(--accent-h);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.kc-button-primary:active, .btn-primary:active, input[type="submit"]:active {
+  transform: scale(0.98);
+}
+
+.kc-button-default, .btn-default {
+  background: var(--elevated);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.kc-button-default:hover { background: var(--surface); }
+
+/* ── Links ───────────────────────────────────────────────────────────────── */
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Alerts ──────────────────────────────────────────────────────────────── */
+#kc-content-wrapper .alert, .alert {
+  border-radius: 7px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  border: 1px solid transparent;
+}
+.alert-error   { background: rgba(248,81,73,0.08); border-color: rgba(248,81,73,0.25); color: #ffa198; }
+.alert-warning { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.25); color: #fbbf24; }
+.alert-success { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.25); color: #34d399; }
+.alert-info    { background: rgba(59,130,246,0.08); border-color: rgba(59,130,246,0.25); color: #93c5fd; }
+
+/* ── Divider / links row ─────────────────────────────────────────────────── */
+.kc-form-options, #kc-form-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* ── Register / back links ───────────────────────────────────────────────── */
+#kc-registration, #kc-registration-container {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 13px;
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+/* ── Info page (email sent, etc.) ────────────────────────────────────────── */
+#kc-info-message {
+  text-align: center;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 8px 0;
+}
+
+/* ── Checkbox ────────────────────────────────────────────────────────────── */
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  #kc-form-wrapper, .card-pf { padding: 28px 20px 32px; margin: 16px; max-width: none; }
+}
+
+/* ── Split Layout ────────────────────────────────────────────────────────── */
+.kc-split-layout {
+  display: flex;
+  width: 100vw;
+  min-height: 100vh;
+}
+
+/* Left — dark green hero panel */
+.kc-split-left {
+  flex: 1 1 58%;
+  background: linear-gradient(155deg, #0d3d2b 0%, #0a5c3f 50%, #0e7a52 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 64px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle grid pattern overlay */
+.kc-split-left::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.kc-split-left-inner {
+  position: relative;
+  max-width: 560px;
+  width: 100%;
+}
+
+/* Brand row */
+.kc-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 64px;
+}
+
+.kc-logo-mark {
+  width: 44px;
+  height: 44px;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+
+.kc-brand-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.3px;
+}
+
+/* Hero headline */
+.kc-hero h1 {
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #fff;
+  letter-spacing: -0.8px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.kc-hero p {
+  font-size: 16px;
+  line-height: 1.65;
+  color: rgba(255,255,255,0.72);
+  margin-bottom: 48px;
+}
+
+/* Feature list */
+.kc-features {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kc-features li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 14px;
+  color: rgba(255,255,255,0.85);
+}
+
+.kc-feature-icon {
+  width: 32px;
+  height: 32px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #6ee7b7;
+}
+
+/* Right — white login panel */
+.kc-split-right {
+  flex: 0 0 480px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 56px;
+}
+
+.kc-split-right-inner {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Page heading inside right panel */
+.kc-split-right h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.4px;
+  margin-bottom: 6px;
+  text-align: left;
+}
+
+/* Alerts inside right panel */
+.kc-split-right .alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.alert-icon { flex-shrink: 0; font-size: 14px; }
+
+@media (max-width: 1024px) {
+  .kc-split-left  { flex: 0 0 50%; padding: 40px; }
+  .kc-split-right { flex: 0 0 50%; min-width: 0; }
+}
+@media (max-width: 720px) {
+  .kc-split-layout { flex-direction: column; }
+  .kc-split-left   { display: none; }
+  .kc-split-right  { flex: 1; min-width: 0; padding: 32px 24px; }
+}

@@ -1,11 +1,11 @@
-import { useMemo, useState, forwardRef } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { useMemo, useState, useRef, forwardRef } from 'react'
+import { AlertTriangle, Plus, Upload, X } from 'lucide-react'
 import {
   ClusterSwitcher,
   type ClusterSwitcherItem,
   pluralize,
 } from '@skyhook-io/k8s-ui'
-import { useContexts, useSwitchContext, useClusterInfo, fetchSessionCounts, type SessionCounts } from '../api/client'
+import { useContexts, useSwitchContext, useClusterInfo, fetchSessionCounts, useImportKubeconfig, type SessionCounts } from '../api/client'
 import { useContextSwitch } from '../context/ContextSwitchContext'
 import { useToast } from '../components/ui/Toast'
 import { useDock } from '../components/dock'
@@ -36,12 +36,16 @@ export const ContextSwitcher = forwardRef<ContextSwitcherHandle, ContextSwitcher
   const [showConfirm, setShowConfirm] = useState(false)
   const [pendingSwitch, setPendingSwitch] = useState<ParsedContext | null>(null)
   const [sessionCounts, setSessionCounts] = useState<SessionCounts | null>(null)
+  const [showImport, setShowImport] = useState(false)
+  const [importYaml, setImportYaml] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: contexts, isLoading: contextsLoading } = useContexts()
   const { data: clusterInfo } = useClusterInfo()
   const switchContext = useSwitchContext()
+  const importKubeconfig = useImportKubeconfig()
   const { startSwitch, endSwitch } = useContextSwitch()
-  const { showError } = useToast()
+  const { showError, showSuccess } = useToast()
   const { tabs } = useDock()
 
   // Parse contexts and decide whether to render group headers (multi-account only).
@@ -173,6 +177,34 @@ export const ContextSwitcher = forwardRef<ContextSwitcherHandle, ContextSwitcher
     setSessionCounts(null)
   }
 
+  const handleImportSubmit = async () => {
+    if (!importYaml.trim()) return
+    try {
+      const result = await importKubeconfig.mutateAsync(importYaml.trim())
+      setShowImport(false)
+      setImportYaml('')
+      if (result.count === 0) {
+        showError('No new contexts', 'All contexts in the kubeconfig already exist.')
+      } else {
+        showSuccess(
+          `Added ${result.count} context${result.count !== 1 ? 's' : ''}`,
+          result.added.join(', '),
+        )
+      }
+    } catch (err) {
+      showError('Import failed', err instanceof Error ? err.message : 'Unknown error')
+    }
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => setImportYaml((ev.target?.result as string) || '')
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
   // In-cluster mode renders a static badge instead of a switcher (only one
   // synthetic context, no kubeconfig to choose from).
   const isInClusterMode = contexts?.length === 1 && contexts[0].name === 'in-cluster'
@@ -217,7 +249,79 @@ export const ContextSwitcher = forwardRef<ContextSwitcherHandle, ContextSwitcher
             <span className="text-xs text-red-400">{switchContext.error?.message}</span>
           ) : undefined
         }
+        footerSlot={
+          <button
+            type="button"
+            onClick={() => setShowImport(true)}
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add cluster
+          </button>
+        }
       />
+
+      {showImport && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <div className="bg-theme-surface border border-theme-border rounded-lg shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="px-4 py-3 border-b border-theme-border flex items-center justify-between">
+              <span className="font-medium text-theme-text-primary">Add cluster via kubeconfig</span>
+              <button
+                type="button"
+                onClick={() => { setShowImport(false); setImportYaml('') }}
+                className="text-theme-text-tertiary hover:text-theme-text-secondary"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-4 py-4 space-y-3">
+              <p className="text-sm text-theme-text-secondary">
+                Paste a kubeconfig file or upload one. New contexts will be merged into your <code className="text-xs bg-theme-elevated px-1 py-0.5 rounded">~/.kube/config</code>.
+              </p>
+              <textarea
+                className="w-full h-48 bg-theme-base border border-theme-border rounded text-xs font-mono text-theme-text-primary placeholder:text-theme-text-tertiary p-3 focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)] resize-none"
+                placeholder="apiVersion: v1&#10;kind: Config&#10;clusters: ..."
+                value={importYaml}
+                onChange={e => setImportYaml(e.target.value)}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-theme-elevated border border-theme-border text-theme-text-secondary hover:bg-theme-hover transition-colors"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Upload file
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".yaml,.yml,.kubeconfig,*"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-theme-border flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowImport(false); setImportYaml('') }}
+                className="px-3 py-1.5 text-sm rounded-md bg-theme-elevated hover:bg-theme-hover text-theme-text-secondary transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleImportSubmit}
+                disabled={!importYaml.trim() || importKubeconfig.isPending}
+                className="px-3 py-1.5 text-sm rounded-md btn-brand disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {importKubeconfig.isPending ? 'Importing…' : 'Import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showConfirm && sessionCounts && pendingSwitch && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">

@@ -39,6 +39,7 @@ import (
 
 	"github.com/skyhook-io/radar/internal/ai"
 	"github.com/skyhook-io/radar/internal/argocd"
+	"github.com/skyhook-io/radar/pkg/projects"
 	"github.com/skyhook-io/radar/internal/auth"
 	"github.com/skyhook-io/radar/internal/cloud"
 	"github.com/skyhook-io/radar/internal/config"
@@ -138,6 +139,11 @@ type Server struct {
 	// aiRuns owns investigations as durable server-side jobs (survive panel close
 	// / navigation / refresh). nil exactly when aiDiagnoser is.
 	aiRuns *ai.RunManager
+
+	// Projects / Users / RBAC — all nil when DATABASE_URL is not set (no-op path).
+	projectStore *projects.Store
+	projectCache *projects.Cache
+	projectQueue *projects.Queue
 }
 
 // Config holds server configuration
@@ -155,6 +161,11 @@ type Config struct {
 	EffectiveConfig    *config.Config // Running startup config for GET /api/config
 	AuthConfig         auth.Config    // Authentication configuration
 	AIHistoryDB        string         // AI run-history SQLite path ("" = memory-only runs)
+
+	// Projects infrastructure — all optional. Set via env vars DATABASE_URL, REDIS_ADDR, AMQP_URL.
+	DatabaseURL string // Postgres DSN; empty disables projects feature
+	RedisAddr   string // host:port; defaults to localhost:6379 when DatabaseURL is set
+	AMQPURL     string // RabbitMQ AMQP URL; defaults to amqp://kubecenter:kubecenter_dev@localhost:5672/
 }
 
 // New creates a new server instance
@@ -291,6 +302,42 @@ func New(cfg Config) *Server {
 		}
 	}
 
+	// Projects — optional; enabled when DATABASE_URL is set.
+	if cfg.DatabaseURL != "" {
+		store, err := projects.NewStore(cfg.DatabaseURL)
+		if err != nil {
+			log.Printf("[projects] store init failed (projects disabled): %v", err)
+		} else {
+			s.projectStore = store
+
+			redisAddr := cfg.RedisAddr
+			if redisAddr == "" {
+				redisAddr = "localhost:6379"
+			}
+			if cache, err := projects.NewCache(redisAddr); err != nil {
+				log.Printf("[projects] redis init failed (projects disabled): %v", err)
+				store.Close()
+				s.projectStore = nil
+			} else {
+				s.projectCache = cache
+			}
+
+			amqpURL := cfg.AMQPURL
+			if amqpURL == "" {
+				amqpURL = "amqp://kubecenter:kubecenter_dev@localhost:5672/"
+			}
+			if q, err := projects.NewQueue(amqpURL); err != nil {
+				log.Printf("[projects] rabbitmq init failed (audit disabled): %v", err)
+			} else {
+				s.projectQueue = q
+				go projects.StartAuditWorker(context.Background(), amqpURL, store)
+				go projects.StartInviteWorker(context.Background(), amqpURL, projects.SMTPConfigFromEnv())
+			}
+
+			log.Printf("[projects] initialized (postgres + redis + rabbitmq)")
+		}
+	}
+
 	s.setupRoutes()
 	return s
 }
@@ -361,6 +408,9 @@ func (s *Server) setupRoutes() {
 			r.Get("/goroutineleak", pprof.Handler("goroutineleak").ServeHTTP) // requires GOEXPERIMENT=goroutineleakprofile at build time
 		})
 	}
+
+	// Admin routes (projects, users, audit) — no-op when projectStore is nil
+	s.registerAdminRoutes(r)
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
@@ -491,6 +541,7 @@ func (s *Server) setupRoutes() {
 			r.Get("/metrics/top/pods", s.handleTopPods)
 			r.Get("/metrics/top/nodes", s.handleTopNodes)
 			r.Get("/metrics/top/resources", s.handleTopResources)
+			r.Get("/metrics/top/namespaces", s.handleTopNamespaces)
 
 			// Port forwarding
 			r.Get("/portforwards", s.handleListPortForwards)
@@ -607,6 +658,7 @@ func (s *Server) setupRoutes() {
 
 			// Context routes
 			r.Get("/contexts", s.handleListContexts)
+			r.Post("/contexts/import", s.handleImportKubeconfig)
 			r.Post("/contexts/{name}", s.handleSwitchContext)
 
 			// Active namespace switcher (k9s :ns equivalent for the
@@ -2789,6 +2841,54 @@ func (s *Server) handleTopPods(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, result)
 }
 
+// handleTopNamespaces aggregates pod CPU and memory per namespace, used for the
+// namespace metrics overview. Returns metricsAvailable=false when metrics-server
+// has no data yet.
+func (s *Server) handleTopNamespaces(w http.ResponseWriter, r *http.Request) {
+	if !s.requireConnected(w) {
+		return
+	}
+	namespaces := s.parseNamespacesForUser(r)
+	if noNamespaceAccess(namespaces) {
+		s.writeJSON(w, map[string]any{"metricsAvailable": false, "namespaces": []any{}})
+		return
+	}
+
+	store := k8s.GetMetricsHistory()
+	if store == nil {
+		s.writeJSON(w, map[string]any{"metricsAvailable": false, "namespaces": []any{}})
+		return
+	}
+
+	type nsMetrics struct {
+		Namespace   string `json:"namespace"`
+		PodCount    int    `json:"podCount"`
+		CPUMilli    int64  `json:"cpuMilli"`
+		MemoryMi    int64  `json:"memoryMi"`
+	}
+
+	agg := map[string]*nsMetrics{}
+	for _, m := range store.GetAllPodMetricsLatest() {
+		if !namespaceAllowed(namespaces, m.Namespace) {
+			continue
+		}
+		e := agg[m.Namespace]
+		if e == nil {
+			e = &nsMetrics{Namespace: m.Namespace}
+			agg[m.Namespace] = e
+		}
+		e.PodCount++
+		e.CPUMilli += m.CPU / 1_000_000  // nanocores → millicores
+		e.MemoryMi += m.Memory / (1024 * 1024) // bytes → MiB
+	}
+
+	items := make([]*nsMetrics, 0, len(agg))
+	for _, v := range agg {
+		items = append(items, v)
+	}
+	s.writeJSON(w, map[string]any{"metricsAvailable": len(items) > 0, "namespaces": items})
+}
+
 // handleTopNodes returns the latest metrics for all nodes (bulk endpoint for table view)
 func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
 	if !s.requireConnected(w) {
@@ -3877,6 +3977,20 @@ func StopAllSessions() {
 
 // Context switching handlers
 
+func (s *Server) handleImportKubeconfig(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+	added, err := k8s.MergeKubeconfig(body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.writeJSON(w, map[string]interface{}{"added": added, "count": len(added)})
+}
+
 func (s *Server) handleListContexts(w http.ResponseWriter, r *http.Request) {
 	contexts, err := k8s.GetAvailableContexts()
 	if err != nil {
@@ -4410,7 +4524,43 @@ func (s *Server) getUserNamespaces(r *http.Request, requested []string) []string
 		s.permCache.Set(user.Username, perms)
 	}
 
-	return auth.FilterNamespacesForUser(requested, user, perms)
+	rbacFiltered := auth.FilterNamespacesForUser(requested, user, perms)
+
+	// Project namespace enforcement: when project store is active and the user
+	// has a resolved access object, further restrict to their project namespaces.
+	if s.projectStore != nil && s.projectCache != nil {
+		clusterCtx := k8s.GetContextName()
+		access, err := s.projectCache.Get(r.Context(), user.Username, s.projectStore)
+		if err == nil && access != nil && !access.IsSuperAdmin() {
+			projectNS := access.AllowedNamespaces()
+			// extract the bare namespace from "clusterCtx/namespace" keys
+			projectNSSet := make(map[string]struct{}, len(projectNS))
+			for _, key := range projectNS {
+				parts := strings.SplitN(key, "/", 2)
+				if len(parts) == 2 && parts[0] == clusterCtx {
+					projectNSSet[parts[1]] = struct{}{}
+				}
+			}
+			if rbacFiltered == nil {
+				// was "all namespaces" from RBAC — cap to project set
+				out := make([]string, 0, len(projectNSSet))
+				for ns := range projectNSSet {
+					out = append(out, ns)
+				}
+				return out
+			}
+			// intersect RBAC-filtered set with project set
+			out := rbacFiltered[:0]
+			for _, ns := range rbacFiltered {
+				if _, ok := projectNSSet[ns]; ok {
+					out = append(out, ns)
+				}
+			}
+			return out
+		}
+	}
+
+	return rbacFiltered
 }
 
 // handleSSE wraps the SSEBroadcaster's HandleSSE with per-user namespace filtering.

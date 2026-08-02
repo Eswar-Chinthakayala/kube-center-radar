@@ -2077,6 +2077,85 @@ export function useTopPodMetrics(options?: { enabled?: boolean; namespaces?: str
   })
 }
 
+// Namespace-level aggregate metrics (CPU + memory sum across all pods in namespace)
+export interface NamespaceMetrics {
+  namespace: string
+  podCount: number
+  cpuMilli: number   // millicores
+  memoryMi: number   // MiB
+}
+export interface TopNamespacesResponse {
+  metricsAvailable: boolean
+  namespaces: NamespaceMetrics[]
+}
+
+export function useTopNamespaceMetrics(options?: { enabled?: boolean }) {
+  return useQuery<TopNamespacesResponse>({
+    queryKey: ['top-namespace-metrics'],
+    queryFn: () => fetchJSON('/metrics/top/namespaces'),
+    enabled: options?.enabled ?? true,
+    staleTime: 25000,
+    refetchInterval: 30000,
+  })
+}
+
+// Workload-level aggregate metrics (CPU + memory summed across all pods of a workload)
+export interface TopWorkloadMetrics {
+  kind: string
+  namespace: string
+  name: string
+  pods: number
+  readyPods: number
+  cpuMilli: number
+  memoryMi: number
+}
+export interface TopWorkloadsResponse {
+  kind: string
+  sort: string
+  namespace?: string
+  metricsAvailable: boolean
+  workloads?: TopWorkloadMetrics[]
+}
+
+export function useTopWorkloadMetrics(options?: { enabled?: boolean; namespace?: string }) {
+  const params = new URLSearchParams({ kind: 'workloads', sort: 'cpu' })
+  if (options?.namespace) params.set('namespace', options.namespace)
+  const qs = params.toString()
+  return useQuery<TopWorkloadsResponse>({
+    queryKey: ['top-workload-metrics', options?.namespace ?? ''],
+    queryFn: () => fetchJSON(`/metrics/top/resources?${qs}`),
+    enabled: options?.enabled ?? true,
+    staleTime: 25000,
+    refetchInterval: 30000,
+  })
+}
+
+// KC user info (projects + role)
+export interface KCProject {
+  id: string
+  slug: string
+  displayName: string
+  color: string
+  role: 'project_admin' | 'member' | 'viewer'
+}
+export interface KCUserInfo {
+  projectsEnabled: boolean
+  userId?: string
+  email?: string
+  name?: string
+  globalRole?: 'super_admin' | 'member'
+  projects?: KCProject[]
+}
+
+export function useKCUser() {
+  return useQuery<KCUserInfo>({
+    queryKey: ['kc-user'],
+    queryFn: () => fetchJSON('/admin/me'),
+    staleTime: 120_000,
+    retry: false,
+  })
+}
+
 // Fetch bulk metrics for all nodes (for CPU/Memory columns in resource table)
 export function useTopNodeMetrics(options?: { enabled?: boolean }) {
   return useQuery<TopNodeMetrics[]>({
@@ -4643,6 +4722,28 @@ export function useSwitchContext() {
       // Invalidate contexts so the dropdown checkmark reflects the backend's
       // current context after a failed switch (backend has already switched
       // the in-memory context even though connectivity failed).
+      queryClient.invalidateQueries({ queryKey: ['contexts'] })
+    },
+  })
+}
+
+export function useImportKubeconfig() {
+  const queryClient = useQueryClient()
+
+  return useMutation<{ added: string[]; count: number }, Error, string>({
+    mutationFn: async (yaml: string) => {
+      const response = await apiFetch(`${getApiBase()}/contexts/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-yaml' },
+        body: yaml,
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(err.error || `HTTP ${response.status}`)
+      }
+      return response.json()
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contexts'] })
     },
   })
