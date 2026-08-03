@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Plus, Trash2, UserMinus, Globe } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, UserMinus, Globe, ChevronDown } from 'lucide-react'
 import { fetchJSON, useKCUser } from '../../api/client'
 
 interface Member {
@@ -46,6 +46,13 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
   const [nsInput, setNsInput] = useState('')
   const [nsCtx, setNsCtx] = useState('')
   const [addMemberErr, setAddMemberErr] = useState('')
+
+  const { data: clusterNamespaces = [] } = useQuery<string[]>({
+    queryKey: ['namespaces'],
+    queryFn: () => fetchJSON('/namespaces'),
+    enabled: isSuperAdmin,
+    staleTime: 60_000,
+  })
 
   const addMemberMut = useMutation({
     mutationFn: () => fetchJSON(`/admin/projects/${projectId}/members`, {
@@ -209,14 +216,25 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
           </h3>
 
           <div className="flex gap-2 items-end">
-            <div className="flex flex-col gap-1 flex-1">
+            <div className="flex flex-col gap-1 flex-1 relative">
               <label className="text-[10px] text-theme-text-tertiary uppercase tracking-wide">Namespace</label>
-              <input
-                className="rounded border border-theme-border bg-theme-surface-2 px-3 py-1.5 text-sm text-theme-text-primary focus:outline-none focus:border-emerald-500"
-                placeholder="production"
-                value={nsInput}
-                onChange={e => setNsInput(e.target.value)}
-              />
+              <div className="relative">
+                <input
+                  list="ns-suggestions"
+                  className="w-full rounded border border-theme-border bg-theme-surface-2 px-3 py-1.5 pr-7 text-sm text-theme-text-primary focus:outline-none focus:border-emerald-500"
+                  placeholder="production"
+                  value={nsInput}
+                  onChange={e => setNsInput(e.target.value)}
+                />
+                <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-text-tertiary pointer-events-none" />
+              </div>
+              {clusterNamespaces.length > 0 && (
+                <datalist id="ns-suggestions">
+                  {clusterNamespaces.map(ns => (
+                    <option key={ns} value={ns} />
+                  ))}
+                </datalist>
+              )}
             </div>
             <div className="flex flex-col gap-1 flex-1">
               <label className="text-[10px] text-theme-text-tertiary uppercase tracking-wide">Cluster context</label>

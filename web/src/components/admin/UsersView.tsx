@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ShieldCheck, Search, Clock } from 'lucide-react'
+import { ShieldCheck, Search, Clock, Plus, Check } from 'lucide-react'
 import { fetchJSON } from '../../api/client'
 
 interface KCUser {
@@ -13,8 +13,17 @@ interface KCUser {
   projectCount?: number
 }
 
+interface Project {
+  id: string
+  displayName: string
+}
+
 function fetchUsers(): Promise<KCUser[]> {
   return fetchJSON('/admin/users')
+}
+
+function fetchProjects(): Promise<Project[]> {
+  return fetchJSON('/admin/projects')
 }
 
 function relTime(iso: string | null): string {
@@ -28,6 +37,72 @@ function relTime(iso: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+function AssignProjectButton({ user, projects }: { user: KCUser; projects: Project[] }) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [assigned, setAssigned] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  const assignMut = useMutation({
+    mutationFn: ({ projectId }: { projectId: string }) =>
+      fetchJSON(`/admin/projects/${projectId}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ email: user.email, role: 'member' }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    onSuccess: () => {
+      setAssigned(true)
+      setOpen(false)
+      qc.invalidateQueries({ queryKey: ['admin-users'] })
+    },
+  })
+
+  if (projects.length === 0) return null
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded border transition-colors ${
+          assigned
+            ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/8'
+            : 'border-dashed border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10'
+        }`}
+      >
+        {assigned ? <Check size={11} /> : <Plus size={11} />}
+        {assigned ? 'Assigned' : 'Assign project'}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-theme-elevated border border-theme-border rounded-lg shadow-theme-md overflow-hidden">
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-theme-text-tertiary uppercase tracking-wide border-b border-theme-border">
+            Add to project as member
+          </div>
+          {projects.map(p => (
+            <button
+              key={p.id}
+              onClick={() => assignMut.mutate({ projectId: p.id })}
+              disabled={assignMut.isPending}
+              className="w-full text-left px-3 py-2.5 text-[12px] text-theme-text-secondary hover:bg-theme-hover hover:text-theme-text-primary transition-colors flex items-center gap-2"
+            >
+              <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-500/50" />
+              {p.displayName}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function UsersView() {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
@@ -35,6 +110,11 @@ export function UsersView() {
   const { data: users = [], isLoading } = useQuery({
     queryKey: ['admin-users'],
     queryFn: fetchUsers,
+  })
+
+  const { data: projects = [] } = useQuery({
+    queryKey: ['admin-projects'],
+    queryFn: fetchProjects,
   })
 
   const promoteMut = useMutation({
@@ -109,6 +189,9 @@ export function UsersView() {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <span className="text-[11px] text-theme-text-tertiary">{relTime(u.lastSeenAt)}</span>
+                {u.globalRole !== 'super_admin' && !u.projectCount && (
+                  <AssignProjectButton user={u} projects={projects} />
+                )}
                 <select
                   value={u.globalRole}
                   onChange={e => promoteMut.mutate({ id: u.id, role: e.target.value })}

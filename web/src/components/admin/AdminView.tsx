@@ -1,14 +1,13 @@
 import { useState } from 'react'
-import { AdminLayout } from './AdminLayout'
+import { AdminLayout, AdminTab } from './AdminLayout'
+import { OverviewView } from './OverviewView'
 import { ProjectsView } from './ProjectsView'
 import { ProjectDetail } from './ProjectDetail'
 import { UsersView } from './UsersView'
 import { AuditLogView } from './AuditLogView'
 
-type AdminTab = 'projects' | 'users' | 'audit'
-
 export function AdminView() {
-  const [tab, setTab] = useState<AdminTab>('projects')
+  const [tab, setTab] = useState<AdminTab>('overview')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
 
   function handleTabChange(t: AdminTab) {
@@ -18,6 +17,7 @@ export function AdminView() {
 
   return (
     <AdminLayout activeTab={tab} onTabChange={handleTabChange}>
+      {tab === 'overview' && <OverviewView onNavigate={handleTabChange} />}
       {tab === 'projects' && (
         selectedProjectId
           ? <ProjectDetail projectId={selectedProjectId} onBack={() => setSelectedProjectId(null)} />
