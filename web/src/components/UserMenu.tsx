@@ -47,20 +47,22 @@ export function UserMenu({ variant = 'topbar', pinned = true }: UserMenuProps = 
     window.location.href = redirectTo
   }, [queryClient])
 
-  if (!authMe?.authEnabled || !authMe?.username) {
-    return null
-  }
-
-  const initials = authMe.username
-    .split('@')[0]
-    .split(/[._-]/)
-    .slice(0, 2)
-    .map(s => s[0]?.toUpperCase() || '')
-    .join('')
-
   const isRail = variant === 'rail'
+  const username = authMe?.username
+  const authEnabled = authMe?.authEnabled
+
+  const initials = username
+    ? username.split('@')[0].split(/[._-]/).slice(0, 2).map(s => s[0]?.toUpperCase() || '').join('')
+    : ''
+
+  const displayName = username?.split('@')[0] ?? 'Local'
+  const tooltipLabel = username ?? 'Local access — no login required'
+
   const avatar = (
-    <span className="w-7 h-7 rounded-full bg-blue-500/15 text-blue-500 flex items-center justify-center text-xs font-medium shrink-0">
+    <span className={clsx(
+      'w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium shrink-0',
+      authEnabled ? 'bg-blue-500/15 text-blue-500' : 'bg-theme-elevated text-theme-text-tertiary',
+    )}>
       {initials || <User className="w-3.5 h-3.5" />}
     </span>
   )
@@ -68,7 +70,7 @@ export function UserMenu({ variant = 'topbar', pinned = true }: UserMenuProps = 
   return (
     <div ref={menuRef} className={clsx('relative', isRail && 'group/item', isRail && !pinned && 'w-10')}>
       {isRail ? (
-        <Tooltip content={authMe.username} position="right" wrapperClassName="!block w-full">
+        <Tooltip content={tooltipLabel} position="right" wrapperClassName="!block w-full">
         <button
           onClick={() => setIsOpen(!isOpen)}
           className={clsx(
@@ -77,14 +79,17 @@ export function UserMenu({ variant = 'topbar', pinned = true }: UserMenuProps = 
           )}
         >
           <span className="flex w-10 shrink-0 items-center justify-center">{avatar}</span>
-          <span className={clsx('pr-3 truncate', !pinned && 'opacity-0')}>{authMe.username.split('@')[0]}</span>
+          <span className={clsx('pr-3 truncate', !pinned && 'opacity-0')}>{displayName}</span>
         </button>
         </Tooltip>
       ) : (
-        <Tooltip content={authMe.username}>
+        <Tooltip content={tooltipLabel}>
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="w-7 h-7 rounded-full bg-blue-500/15 text-blue-500 flex items-center justify-center text-xs font-medium hover:bg-blue-500/25 transition-colors"
+          className={clsx(
+            'w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-colors',
+            authEnabled ? 'bg-blue-500/15 text-blue-500 hover:bg-blue-500/25' : 'bg-theme-elevated text-theme-text-tertiary hover:bg-theme-hover',
+          )}
         >
           {initials || <User className="w-3.5 h-3.5" />}
         </button>
@@ -97,33 +102,38 @@ export function UserMenu({ variant = 'topbar', pinned = true }: UserMenuProps = 
           aria-hidden
           className="pointer-events-none absolute left-full top-1/2 z-50 ml-1 hidden -translate-y-1/2 whitespace-nowrap rounded-md border border-theme-border bg-theme-hover px-2.5 py-1 text-[13px] font-medium text-theme-text-primary opacity-0 shadow-lg shadow-black/30 transition-opacity duration-75 group-hover/item:block group-hover/item:opacity-100"
         >
-          Account
+          {displayName}
         </span>
       )}
 
       {isOpen && (
         <div className={clsx(
           'absolute w-56 bg-theme-surface border border-theme-border rounded-lg shadow-lg z-50 py-1',
-          // Rail: open UP (it sits at the viewport bottom) and align to the rail's
-          // left edge so a 56px slim column doesn't clip it (it extends right).
           isRail ? 'bottom-full left-2 mb-1.5' : 'right-0 top-full mt-1.5',
         )}>
           <div className="px-3 py-2 border-b border-theme-border">
-            <p className="text-sm font-medium text-theme-text-primary truncate">{authMe.username}</p>
-            {authMe.groups && authMe.groups.length > 0 && (
+            <p className="text-sm font-medium text-theme-text-primary truncate">
+              {username ?? 'Local access'}
+            </p>
+            {authEnabled && authMe?.groups && authMe.groups.length > 0 && (
               <p className="text-[11px] text-theme-text-tertiary mt-0.5 truncate">
                 {authMe.groups.join(', ')}
               </p>
             )}
+            {!authEnabled && (
+              <p className="text-[11px] text-theme-text-tertiary mt-0.5">No login required</p>
+            )}
           </div>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-theme-text-secondary hover:bg-theme-hover transition-colors"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            Logout
-          </button>
-          {authMe.authMode === 'proxy' && !authMe.proxyLogoutConfigured && (
+          {authEnabled && (
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-theme-text-secondary hover:bg-theme-hover transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Logout
+            </button>
+          )}
+          {authEnabled && authMe?.authMode === 'proxy' && !authMe.proxyLogoutConfigured && (
             <p className="px-3 py-1.5 text-[11px] text-theme-text-tertiary border-t border-theme-border">
               Logout clears the Radar session. The auth proxy may sign you back in automatically.
             </p>

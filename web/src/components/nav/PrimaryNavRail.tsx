@@ -75,8 +75,9 @@ interface PrimaryNavRailProps {
 
 export function PrimaryNavRail({ activeView, onNavigate, pinned, onTogglePinned, showPinToggle = true, onOpenSettings, accountSlot }: PrimaryNavRailProps) {
   const { data: kcUser } = useKCUser()
-  const showAdmin = kcUser?.projectsEnabled &&
-    (kcUser.globalRole === 'super_admin' || (kcUser.projects && kcUser.projects.length > 0))
+  const showAdmin = !kcUser?.projectsEnabled ||
+    kcUser.globalRole === 'super_admin' ||
+    (kcUser.projects && kcUser.projects.length > 0)
 
   return (
     <aside
